@@ -58,7 +58,7 @@ index e1cbc09..b32a184 100644
 +GIT_INCLUDEDIR=$(GIT_PATH)
 +RPM_OPT_FLAGS ?= -O2 -g
 +CFLAGS=$(RPM_OPT_FLAGS) $(GCC_WARNINGS) -I$(GIT_INCLUDEDIR) -DSHA1_HEADER='<openssl/sha.h>'
-+LIBS=-L$(GIT_LIBDIR) -lgit -lxdiff -lssl -lcrypto -lz -lpthread
++LIBS=-L$(GIT_LIBDIR) -lgit -lgit_xdiff -lssl -lcrypto -lz -lpthread
  YFLAGS=-d -l
  LFLAGS=-l
  
