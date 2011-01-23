@@ -1,0 +1,307 @@
+ .gear/rules                                        |    2 +
+ .../tags/d00431beda6ee16b0a237930c16df7836b5deaaa  |   13 ++++
+ .gear/tags/list                                    |    1 +
+ Makefile                                           |    9 ++-
+ git.c                                              |   27 +++++---
+ parsecvs.c                                         |    8 ++-
+ parsecvs.spec                                      |   64 ++++++++++++++++++++
+ rcs2git.c                                          |    2 +-
+ tree.c                                             |    2 +-
+ 9 files changed, 110 insertions(+), 18 deletions(-)
+
+diff --git a/.gear/rules b/.gear/rules
+new file mode 100644
+index 0000000..c360932
+--- /dev/null
++++ b/.gear/rules
+@@ -0,0 +1,2 @@
++tar: 72db9019:. name=parsecvs
++diff: 72db9019:. . name=parsecvs-@version@-@release@.patch
+diff --git a/.gear/tags/d00431beda6ee16b0a237930c16df7836b5deaaa b/.gear/tags/d00431beda6ee16b0a237930c16df7836b5deaaa
+new file mode 100644
+index 0000000..fc36959
+--- /dev/null
++++ b/.gear/tags/d00431beda6ee16b0a237930c16df7836b5deaaa
+@@ -0,0 +1,13 @@
++object 72db90199b6d6fd6863ede50d72ead7fc9d45330
++type commit
++tag 72db9019
++tagger Alexey Tourbin <at@altlinux.ru> 1213860696 +0400
++
++72db9019
++-----BEGIN PGP SIGNATURE-----
++Version: GnuPG v1.4.9 (GNU/Linux)
++
++iEYEABECAAYFAkhaC1gACgkQfBKgtDjnu0a0BwCgnOkeqYj8WLKJfN181K/s1Y6q
++0WcAn3y+sXfVrYzziy7mkWCMNIGssrjy
++=fUMN
++-----END PGP SIGNATURE-----
+diff --git a/.gear/tags/list b/.gear/tags/list
+new file mode 100644
+index 0000000..c93953f
+--- /dev/null
++++ b/.gear/tags/list
+@@ -0,0 +1 @@
++d00431beda6ee16b0a237930c16df7836b5deaaa 72db9019
+diff --git a/Makefile b/Makefile
+index e1cbc09..b32a184 100644
+--- a/Makefile
++++ b/Makefile
+@@ -2,9 +2,12 @@ GCC_WARNINGS1=-Wall -Wpointer-arith -Wstrict-prototypes
+ GCC_WARNINGS2=-Wmissing-prototypes -Wmissing-declarations
+ GCC_WARNINGS3=-Wnested-externs -fno-strict-aliasing
+ GCC_WARNINGS=$(GCC_WARNINGS1) $(GCC_WARNINGS2) $(GCC_WARNINGS3)
+-CFLAGS=-O2 -g $(GCC_WARNINGS) -I../git -DSHA1_HEADER='<openssl/sha.h>'
+ GITPATH=../git
+-LIBS=-L$(GITPATH) -lgit -lssl -lcrypto -lz
++GIT_LIBDIR=$(GIT_PATH)
++GIT_INCLUDEDIR=$(GIT_PATH)
++RPM_OPT_FLAGS ?= -O2 -g
++CFLAGS=$(RPM_OPT_FLAGS) $(GCC_WARNINGS) -I$(GIT_INCLUDEDIR) -DSHA1_HEADER='<openssl/sha.h>'
++LIBS=-L$(GIT_LIBDIR) -lgit -lxdiff -lssl -lcrypto -lz -lpthread
+ YFLAGS=-d -l
+ LFLAGS=-l
+ 
+@@ -13,7 +16,7 @@ OBJS=gram.o lex.o parsecvs.o cvsutil.o revdir.o \
+ 	nodehash.o tags.o tree.o
+ 
+ parsecvs: $(OBJS)
+-	cc $(CFLAGS) -o $@ $(OBJS) $(LIBS)
++	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
+ 
+ $(OBJS): cvs.h
+ lex.o: y.tab.h
+diff --git a/git.c b/git.c
+index da320d1..e07b423 100644
+--- a/git.c
++++ b/git.c
+@@ -75,8 +75,13 @@ static size_t log_size;
+ static char *
+ git_log(rev_commit *commit)
+ {
+-        if (!log_command)
+-                return commit->log;
++	int do_command = log_command && *log_command
++		&& strcmp(log_command, "/bin/true")
++		&& strcmp(log_command, "true")
++		&& strcmp(log_command, ":");
++
++	if (!do_command)
++		return commit->log;
+ 
+ 	char    *filename;
+ 	char	*command;
+@@ -250,7 +255,7 @@ git_status (void)
+     fprintf (STATUS, "Save: %35.35s ", git_current_head);
+     for (s = 0; s < PROGRESS_LEN + 1; s++)
+ 	putc (s == spot ? '*' : '.', STATUS);
+-    fprintf (STATUS, " %5d of %5d\n", git_current_commit, git_total_commits);
++    fprintf (STATUS, " %5d of %5d\r", git_current_commit, git_total_commits);
+     fflush (STATUS);
+ }
+ 
+@@ -336,7 +341,7 @@ git_update_ref (char *sha1, char *type, char *name)
+     char    *command;
+     int	    n;
+ 
+-    command = git_format_command ("git-update-ref 'refs/%s/%s' '%s'",
++    command = git_format_command ("git update-ref 'refs/%s/%s' '%s'",
+ 				  type, name, sha1);
+     if (!command)
+ 	return 0;
+@@ -371,11 +376,13 @@ git_mktag (rev_commit *commit, char *name)
+ 		"object %s\n"
+ 		"type commit\n"
+ 		"tag %s\n"
+-		"tagger %s\n"
++		"tagger %s <%s> %ld +0000\n"
+ 		"\n",
+ 		commit->sha1,
+ 		name,
+-		author ? author->full : commit->author);
++		author ? author->full : commit->author,
++		author ? author->email : commit->author,
++		(long)commit->date);
+     if (rv < 1) {
+ 	fprintf (stderr, "%s: %s\n", filename, strerror (errno));
+ 	fclose (f);
+@@ -389,7 +396,7 @@ git_mktag (rev_commit *commit, char *name)
+ 	return NULL;
+     }
+ 
+-    command = git_format_command ("git-mktag < '%s'", filename);
++    command = git_format_command ("git mktag < '%s'", filename);
+     if (!command) {
+ 	unlink (filename);
+ 	return NULL;
+@@ -519,7 +526,7 @@ git_end_pack (char *pack_file, char *pack_dir)
+ 
+     if (fclose (packf) == EOF)
+ 	return;
+-    command = git_format_command ("git-pack-objects -q --non-empty .tmp-pack < '%s'", 
++    command = git_format_command ("git pack-objects -q --non-empty .tmp-pack < '%s'", 
+ 				  pack_file);
+     if (!command) {
+ 	unlink (pack_file);
+@@ -553,7 +560,7 @@ git_end_pack (char *pack_file, char *pack_dir)
+     free (dst_pack_pack);
+     free (dst_pack_idx);
+     
+-    (void) git_system ("git-prune-packed");
++    (void) git_system ("git prune-packed");
+     reprepare_packed_git ();
+ }
+ 
+@@ -567,7 +574,7 @@ git_pack_directory (void)
+ 	char    *git_dir;
+ 	char	*objects_dir;
+ 	
+-	git_dir = git_system_to_string ("git-rev-parse --git-dir");
++	git_dir = git_system_to_string ("git rev-parse --git-dir");
+ 	if (!git_dir)
+ 	    return NULL;
+ 	objects_dir = git_format_command ("%s/objects", git_dir);
+diff --git a/parsecvs.c b/parsecvs.c
+index 1dc2017..53ff601 100644
+--- a/parsecvs.c
++++ b/parsecvs.c
+@@ -749,7 +749,7 @@ static void load_status (char *name)
+     fprintf (STATUS, "Load: %35.35s ", name);
+     for (s = 0; s < PROGRESS_LEN + 1; s++)
+ 	putc (s == spot ? '*' : '.', STATUS);
+-    fprintf (STATUS, " %5d of %5d\n", load_current_file, load_total_files);
++    fprintf (STATUS, " %5d of %5d\r", load_current_file, load_total_files);
+     fflush (STATUS);
+ }
+ 
+@@ -785,9 +785,10 @@ main (int argc, char **argv)
+ 	    { "version",	    0, 0, 'V' },
+ 	    { "commit-time-window", 1, 0, 'w' },
+             { "log-command",        1, 0, 'l' },
++            { "edit-log",           1, 0, 'e' },
+             { "autopack",           1, 0, 'p' },
+ 	};
+-	int c = getopt_long(argc, argv, "+hVw:l:p:", options, NULL);
++	int c = getopt_long(argc, argv, "+hVw:l:e:p:", options, NULL);
+ 	if (c < 0)
+ 	    break;
+ 	switch (c) {
+@@ -804,6 +805,7 @@ main (int argc, char **argv)
+ 		   "Example: find -name '*,v' | parsecvs -l edit-change-log -p 1024\n");
+ 	    return 0;
+         case 'l':
++        case 'e':
+             log_command = strdup (optarg);
+             break;
+         case 'p':
+@@ -866,7 +868,7 @@ main (int argc, char **argv)
+ 	last = fn->file;
+ 	nfile++;
+     }
+-    if (git_system ("git-init-db --shared") != 0)
++    if (git_system ("git init-db --shared") != 0)
+ 	exit (1);
+     load_total_files = nfile;
+     load_current_file = 0;
+diff --git a/parsecvs.spec b/parsecvs.spec
+new file mode 100644
+index 0000000..207d1d3
+--- /dev/null
++++ b/parsecvs.spec
+@@ -0,0 +1,64 @@
++Name: parsecvs
++Version: 0.1
++Release: alt6
++
++Summary: RCS ,v file parser and GIT import tool
++License: GPL
++Group: Development/Other
++
++URL: http://gitweb.freedesktop.org/?p=users/keithp/parsecvs.git
++
++Packager: Alexey Tourbin <at@altlinux.ru>
++
++Source: %name.tar
++Patch: %name-%version-%release.patch
++
++# Automatically added by buildreq on Thu Jun 19 2008
++BuildRequires: flex libgit-devel libssl-devel zlib-devel
++
++%description
++This directory contains code which can directly read RCS ,v files and
++generate a git-style rev-list structure from them. Revision lists can be
++merged together to produce a composite revision history for an arbitrary
++collection of files.
++
++%prep
++%setup -q -n %name
++%patch -p1
++
++%build
++make GIT_LIBDIR=%_libdir GIT_INCLUDEDIR=%_includedir/git
++
++%install
++install -pD -m755 %name %buildroot%_bindir/%name
++
++%files
++%doc README
++%_bindir/%name
++
++%changelog
++* Wed Sep 01 2010 Alexey I. Froloff <raorn@altlinux.org> 0.1-alt6
++- Fixed build with git>=1.7.2.
++
++* Sat Feb 07 2009 Dmitry V. Levin <ldv@altlinux.org> 0.1-alt5
++- Fixed build with git>=1.6.1.
++
++* Sat Nov 01 2008 Sir Raorn <raorn@altlinux.ru> 0.1-alt4
++- Replace obsolete "git-foo" invocations with modern "git foo"
++
++* Fri Aug 15 2008 Sir Raorn <raorn@altlinux.ru> 0.1-alt3
++- Do not inherit keyword substitution flags from previous file
++- Slider-like progressbasr when parsing and saving files
++
++* Thu Jun 19 2008 Alexey Tourbin <at@altlinux.ru> 0.1-alt2
++- updated to 72db9019 (20080117)
++- fixed git_mktag (#16051)
++
++* Fri Dec 29 2006 ALT QA Team Robot <qa-robot@altlinux.org> 0.1-alt1.1
++- Rebuilt due to libcrypto.so.4 -> libcrypto.so.6 soname change.
++
++* Sat Oct 21 2006 Alexey Tourbin <at@altlinux.ru> 0.1-alt1
++- initial revision
++- implemented object tags (instead of weak tags)
++- implemented `-e CMD' option for custom changelog editor invocation;
++  use `-e :' to keep changelogs intact
+diff --git a/rcs2git.c b/rcs2git.c
+index c13c1f4..f55305f 100644
+--- a/rcs2git.c
++++ b/rcs2git.c
+@@ -837,13 +837,13 @@ static void enter_branch(Node *node)
+ void generate_files(cvs_file *cvs)
+ {
+ 	int expand_override_enabled = 1;
+-	int expandflag = Gexpand < EXPANDKO;
+ 	Node *node = head_node;
+ 	depth = 0;
+ 	Gfilename = cvs->name;
+ 	if (cvs->expand && expand_override_enabled)
+ 		Gexpand = expand_override(cvs->expand);
+ 	else	Gexpand = EXPANDKK;
++	int expandflag = Gexpand < EXPANDKO;
+ 	Gabspath = NULL;
+ 	Gline = NULL; Ggap = Ggapsize = Glinemax = 0;
+ 	stack[0].node = node;
+diff --git a/tree.c b/tree.c
+index a76f27c..e2a041c 100644
+--- a/tree.c
++++ b/tree.c
+@@ -177,7 +177,7 @@ rev_commit *create_tree(rev_commit *leader)
+ 
+ void init_tree(int n)
+ {
+-	git_config(git_default_config);
++	git_config(git_default_config, NULL);
+ 	strip = n;
+ }
+ 
