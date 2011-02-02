@@ -11,6 +11,7 @@ Patch0:		%{name}-0.1-alt6.patch
 BuildRequires:	flex
 BuildRequires:	git-core-devel
 BuildRequires:	openssl-devel
+BuildRequires:	yacc
 BuildRequires:	zlib-devel
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
